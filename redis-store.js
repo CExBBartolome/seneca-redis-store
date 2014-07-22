@@ -172,7 +172,6 @@ module.exports = function(opts) {
 
       var ent = args.ent;
       var q = args.q;
-      var table = tablename(ent);
       var entp = {};
 
       if (!ent.id) {
@@ -184,15 +183,28 @@ module.exports = function(opts) {
         }
       }
 
+      var key = redisKeyForEntity(ent);
+
       entp = makeentp(ent);
 
       var objectMap = determineObjectMap(ent);
-      dbConn.hset(table, ent.id, entp, function(err, result) {
+      dbConn.set(key, entp, function(err, result) {
         if (!error(args, err, cb)) {
           saveMap(dbConn, objectMap, function(err, result) {
             if (!error(args, err, cb)) {
-              seneca.log(args.tag$,'save', result);
-              cb(null, ent);
+
+              if(!args.expire) {
+                seneca.log(args.tag$,'save', result);
+                cb(null, ent);
+              } else {
+                dbConn.expire(key, args.expire, function(err, result) {
+                  if(err) {
+                    seneca.log.error('expire failed', key, args.expire, err)
+                  }
+                  seneca.log(args.tag$,'save', result);
+                  cb(null, ent);
+                });
+              }
             }
           });
         }
@@ -212,40 +224,32 @@ module.exports = function(opts) {
       assert(cb);
       assert(args.qent);
       assert(args.q);
+      assert(args.q.id);
 
       var qent = args.qent;
       var q = _.clone(args.q);
       var table = tablename(qent);
+      qent.id = q.id;
+      var key = redisKeyForEntity(qent);
 
       q.limit$ = 1;
+      loadMap(dbConn, table, function(err, objMap) {
+        if (!error(args, err, cb)) {
 
-      if (!q.id) {
-        store.list(args, function(err, list) {
-          if (!error(args, err, cb)) {
-            var ent = list[0] || null;
-            seneca.log(args.tag$, 'load', ent);
-            cb(err, ent ? ent : null )
-          }
-        });
-      }
-      else {
-        loadMap(dbConn, table, function(err, objMap) {
-          if (!error(args, err, cb)) {
-            dbConn.hget(table, q.id, function(err, row) {
-              if (!error(args, err, cb)) {
-                if (!row) {
-                  cb(null, null);
-                }
-                else {
-                  var ent = makeent(qent, row, objMap);
-                  seneca.log(args.tag$, 'load', ent);
-                  cb(null, ent);
-                }
+          dbConn.get(key, function(err, row) {
+            if (!error(args, err, cb)) {
+              if (!row) {
+                cb(null, null);
               }
-            });
-          }
-        });
-      }
+              else {
+                var ent = makeent(qent, row, objMap);
+                seneca.log(args.tag$, 'load', ent);
+                cb(null, ent);
+              }
+            }
+          });
+        }
+      });
     },
 
 
@@ -387,7 +391,13 @@ module.exports = function(opts) {
 
 var tablename = function (entity) {
   var canon = entity.canon$({object:true});
-  return (canon.base?canon.base+'_':'')+canon.name;
+  var typeStr = (canon.base?canon.base+'_':'')+canon.name;
+  return typeStr;
+};
+
+var redisKeyForEntity = function(entity) {
+  var entityTypeStr = tablename(entity);
+  return entityTypeStr + '_' + entity.id;
 };
 
 
@@ -468,8 +478,6 @@ var determineObjectMap = function(ent){
   return objectMap;
 };
 
-
-
 var loadMap = function(dbConn, key, cb){
   var table  = 'seneca_object_map';
 
@@ -483,8 +491,6 @@ var loadMap = function(dbConn, key, cb){
     }
   });
 };
-
-
 
 var saveMap = function(dbConn, newObjectMap, cb) {
 
@@ -510,5 +516,3 @@ var saveMap = function(dbConn, newObjectMap, cb) {
 
   });
 };
-
-
