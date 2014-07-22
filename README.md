@@ -1,3 +1,7 @@
+
+WARNING: this branch has no 'list' and 'remove' functionality. However it does
+ support expiring entities.
+
 Seneca-Redis is a Redis storage driver for [Seneca] MVP toolkit
 
 
